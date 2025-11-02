@@ -176,9 +176,9 @@ app.post("/lead", async (req, res) => {
       .single();
 
     if (error) {
-      console.error(error);
-      return res.status(500).json({ error: "insert lead failed" });
-    }
+  console.error("Supabase insert error:", error);
+  return res.status(500).json({ error: error.message, details: error });
+}
 
     return res.json({ ok: true, lead });
   } catch (e) {

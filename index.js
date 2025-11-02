@@ -296,16 +296,19 @@ app.get("/pdf-preview/:id", async (req, res) => {
       return res.status(404).json({ error: "Bien introuvable" });
     }
 
-    const PDFDocument = require("pdfkit"); // si pas déjà importé en haut
-    res.setHeader("Content-Type", "application/pdf");
-
-    const safeTitle = (bien.titre || `bien-${bienId}`).replace(/[^\w-]+/g, "-");
-    res.setHeader("Content-Disposition", `inline; filename="IMMOWAY_${safeTitle}.pdf"`);
-
+    // ⚠️ Pas de require ici, on a déjà: import PDFDocument from "pdfkit" en haut
     const doc = new PDFDocument({ margin: 48 });
-    doc.pipe(res); // envoi direct au navigateur
 
-    // --- Contenu minimal (tu peux le remplacer par ta mise en page actuelle)
+    const safeTitle = (bien.titre || `bien-${bienId}`).toString().replace(/[^\w-]+/g, "-");
+    const filename = `IMMOWAY_${safeTitle}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+
+    // Stream du PDF vers le navigateur
+    doc.pipe(res);
+
+    // --- Contenu minimal d’aperçu ---
     doc.fontSize(18).text(bien.titre || `Bien #${bienId}`, { underline: true });
     doc.moveDown();
     const lignes = [
@@ -320,20 +323,15 @@ app.get("/pdf-preview/:id", async (req, res) => {
       { align: "justify" }
     );
 
-    doc.end(); // fin
-  } catch (e) {
-    console.error("Erreur PDF preview:", e);
-    res.status(500).json({ error: "Erreur lors de la génération du PDF" });
-  }
-});
-
-
+    doc.end();
   } catch (err) {
     console.error("Erreur PDF preview:", err);
-    res.status(500).json({ error: "Erreur lors de la génération du PDF" });
+    return res.status(500).json({ error: "Erreur lors de la génération du PDF" });
   }
 });
 
+// ✅ Lancer le serveur
+const PORT = Number(process.env.PORT) || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Proxy en ligne sur le port ${PORT}`);
 });

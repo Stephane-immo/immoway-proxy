@@ -3,8 +3,44 @@ import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import PDFDocument from "pdfkit";
 
 dotenv.config();
+// --- Helpers PDF ---
+function bufferFromStream(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (c) => chunks.push(c));
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
+    stream.on("error", reject);
+  });
+}
+
+async function buildBienPdf({ bien, synthese }) {
+  const doc = new PDFDocument({ margin: 48 });
+  const out = doc; // on capte le stream
+
+  // En-tête
+  doc.fontSize(20).text(bien.titre || "Fiche bien", { underline: true });
+  doc.moveDown(0.5);
+  doc.fontSize(12).fillColor("#666").text(`Ville : ${bien.ville || "-"}`);
+  if (bien.prix) doc.text(`Prix : ${bien.prix} €`);
+  if (bien.surface) doc.text(`Surface : ${bien.surface} m²`);
+  doc.moveDown();
+
+  // Synthèse IA
+  doc.fillColor("#000").fontSize(14).text("Présentation du bien", { underline: true });
+  doc.moveDown(0.5);
+  doc.fontSize(12).text(synthese || "—");
+
+  // Pied de page
+  doc.moveDown(2);
+  doc.fontSize(10).fillColor("#888").text("Dossier généré automatiquement par IMMOWAY", { align: "center" });
+
+  doc.end();
+  return bufferFromStream(out);
+}
+
 
 const app = express();
 app.use(cors());
@@ -191,6 +227,61 @@ app.post("/lead", async (req, res) => {
 // Lancement serveur
 // -----------------------------
 const PORT = Number(process.env.PORT) || 10000;
+// ✅ ROUTE PDF DU BIEN
+app.post("/pdf-bien", async (req, res) => {
+  try {
+    const { bienId } = req.body || {};
+    if (!bienId) {
+      return res.status(422).json({ error: "bienId requis" });
+    }
+
+    // 1) Récupérer le bien
+    const { data: bien, error } = await supabase
+      .from("biens")
+      .select("*")
+      .eq("id", bienId)
+      .single();
+
+    if (error || !bien) {
+      return res.status(404).json({ error: "Bien introuvable" });
+    }
+
+    // 2) Demander une synthèse à l'IA
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            "Tu es un conseiller immobilier. Rédige une présentation claire, structurée et vendeuse du bien, en français, sans exagération."
+        },
+        {
+          role: "user",
+          content: `Données du bien (JSON) : ${JSON.stringify(bien)}. Rédige la présentation.`
+        }
+      ]
+    });
+
+    const synthese =
+      completion?.choices?.[0]?.message?.content?.trim() ||
+      "Présentation non disponible pour le moment.";
+
+    // 3) Construire le PDF en mémoire
+    const buffer = await buildBienPdf({ bien, synthese });
+
+    // 4) Retourner le PDF en téléchargement
+    const safeTitle = (bien.titre || `bien-${bienId}`).replace(/[^\w\-]+/g, "_");
+    const filename = `IMMOWAY_${safeTitle}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.status(200).send(buffer);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Erreur serveur (pdf-bien)" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy en ligne sur le port ${PORT}`);
 });

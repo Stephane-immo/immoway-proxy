@@ -281,6 +281,48 @@ app.post("/pdf-bien", async (req, res) => {
     return res.status(500).json({ error: "Erreur serveur (pdf-bien)" });
   }
 });
+// ✅ Route pour prévisualiser le PDF d’un bien
+app.get("/pdf-preview/:bienId", async (req, res) => {
+  try {
+    const bienId = req.params.bienId;
+
+    // 1️⃣ Récupérer le bien dans Supabase
+    const { data: bien, error } = await supabase
+      .from("biens")
+      .select("*")
+      .eq("id", bienId)
+      .single();
+
+    if (error || !bien) {
+      return res.status(404).json({ error: "Bien introuvable" });
+    }
+
+    // 2️⃣ Synthèse simple pour le PDF
+    const synthese = `
+      ✅ Fiche détaillée du bien #${bien.id}
+
+      🏠 Type : ${bien.type_bien ?? "Non renseigné"}
+      📍 Ville : ${bien.ville ?? "Non renseigné"}
+      📏 Surface : ${bien.surface ?? "Non renseigné"} m²
+      💶 Prix : ${bien.prix ?? "Non renseigné"} €
+
+      📄 Description :
+      ${bien.description ?? "Aucune description fournie"}
+    `;
+
+    // 3️⃣ Génération via ta fonction existante
+    const pdfBuffer = await buildBienPdf(bien, synthese);
+
+    // 4️⃣ Réponse en affichage direct
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline; filename=bien.pdf");
+    res.send(pdfBuffer);
+
+  } catch (err) {
+    console.error("Erreur PDF preview:", err);
+    res.status(500).json({ error: "Erreur lors de la génération du PDF" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy en ligne sur le port ${PORT}`);

@@ -226,7 +226,6 @@ app.post("/lead", async (req, res) => {
 // -----------------------------
 // Lancement serveur
 // -----------------------------
-const PORT = Number(process.env.PORT) || 10000;
 // ✅ ROUTE PDF DU BIEN
 app.post("/pdf-bien", async (req, res) => {
   try {
@@ -270,7 +269,7 @@ app.post("/pdf-bien", async (req, res) => {
     const buffer = await buildBienPdf({ bien, synthese });
 
     // 4) Retourner le PDF en téléchargement
-    const safeTitle = (bien.titre || `bien-${bienId}`).replace(/[^\w\-]+/g, "_");
+    const safeTitle = (bien.titre || `bien-${bienId}`).replace(/[^\w-]+/g, "_");
     const filename = `IMMOWAY_${safeTitle}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
@@ -281,6 +280,7 @@ app.post("/pdf-bien", async (req, res) => {
     return res.status(500).json({ error: "Erreur serveur (pdf-bien)" });
   }
 });
+
 // ✅ Route pour prévisualiser le PDF d’un bien
 app.get("/pdf-preview/:id", async (req, res) => {
   try {
@@ -296,7 +296,6 @@ app.get("/pdf-preview/:id", async (req, res) => {
       return res.status(404).json({ error: "Bien introuvable" });
     }
 
-    // ⚠️ Pas de require ici, on a déjà: import PDFDocument from "pdfkit" en haut
     const doc = new PDFDocument({ margin: 48 });
 
     const safeTitle = (bien.titre || `bien-${bienId}`).toString().replace(/[^\w-]+/g, "-");
@@ -305,10 +304,8 @@ app.get("/pdf-preview/:id", async (req, res) => {
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
 
-    // Stream du PDF vers le navigateur
     doc.pipe(res);
 
-    // --- Contenu minimal d’aperçu ---
     doc.fontSize(18).text(bien.titre || `Bien #${bienId}`, { underline: true });
     doc.moveDown();
     const lignes = [
@@ -330,7 +327,7 @@ app.get("/pdf-preview/:id", async (req, res) => {
   }
 });
 
-// ✅ Lancer le serveur
+// ✅ Lancer le serveur (UNE SEULE FOIS)
 const PORT = Number(process.env.PORT) || 10000;
 app.listen(PORT, () => {
   console.log(`✅ Proxy en ligne sur le port ${PORT}`);

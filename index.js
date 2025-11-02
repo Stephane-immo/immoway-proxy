@@ -282,11 +282,10 @@ app.post("/pdf-bien", async (req, res) => {
   }
 });
 // ✅ Route pour prévisualiser le PDF d’un bien
-app.get("/pdf-preview/:bienId", async (req, res) => {
+app.get("/pdf-preview/:id", async (req, res) => {
   try {
-    const bienId = req.params.bienId;
+    const bienId = Number(req.params.id);
 
-    // 1️⃣ Récupérer le bien dans Supabase
     const { data: bien, error } = await supabase
       .from("biens")
       .select("*")
@@ -297,26 +296,37 @@ app.get("/pdf-preview/:bienId", async (req, res) => {
       return res.status(404).json({ error: "Bien introuvable" });
     }
 
-    // 2️⃣ Synthèse simple pour le PDF
-    const synthese = `
-      ✅ Fiche détaillée du bien #${bien.id}
-
-      🏠 Type : ${bien.type_bien ?? "Non renseigné"}
-      📍 Ville : ${bien.ville ?? "Non renseigné"}
-      📏 Surface : ${bien.surface ?? "Non renseigné"} m²
-      💶 Prix : ${bien.prix ?? "Non renseigné"} €
-
-      📄 Description :
-      ${bien.description ?? "Aucune description fournie"}
-    `;
-
-    // 3️⃣ Génération via ta fonction existante
-    const pdfBuffer = await buildBienPdf(bien, synthese);
-
-    // 4️⃣ Réponse en affichage direct
+    const PDFDocument = require("pdfkit"); // si pas déjà importé en haut
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline; filename=bien.pdf");
-    res.send(pdfBuffer);
+
+    const safeTitle = (bien.titre || `bien-${bienId}`).replace(/[^\w-]+/g, "-");
+    res.setHeader("Content-Disposition", `inline; filename="IMMOWAY_${safeTitle}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 48 });
+    doc.pipe(res); // envoi direct au navigateur
+
+    // --- Contenu minimal (tu peux le remplacer par ta mise en page actuelle)
+    doc.fontSize(18).text(bien.titre || `Bien #${bienId}`, { underline: true });
+    doc.moveDown();
+    const lignes = [
+      `Ville : ${bien.ville ?? "NC"}`,
+      `Prix : ${bien.prix != null ? Number(bien.prix).toLocaleString("fr-FR") + " €" : "NC"}`,
+      `Surface : ${bien.surface != null ? bien.surface + " m²" : "NC"}`,
+    ];
+    lignes.forEach(l => doc.fontSize(12).text(l));
+    doc.moveDown();
+    doc.fontSize(12).text(
+      "Aperçu généré automatiquement. La version complète inclut la synthèse IA, les équipements, les photos et les liens.",
+      { align: "justify" }
+    );
+
+    doc.end(); // fin
+  } catch (e) {
+    console.error("Erreur PDF preview:", e);
+    res.status(500).json({ error: "Erreur lors de la génération du PDF" });
+  }
+});
+
 
   } catch (err) {
     console.error("Erreur PDF preview:", err);

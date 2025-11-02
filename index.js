@@ -151,6 +151,41 @@ ${question}
     return res.status(500).json({ error: "Erreur serveur" });
   }
 });
+// ✅ Créer un LEAD (contact intéressé)
+app.post("/lead", async (req, res) => {
+  try {
+    const { bienId, nom, phone, email, message } = req.body || {};
+
+    if (!bienId || !phone) {
+      return res
+        .status(422)
+        .json({ error: "bienId et phone sont requis" });
+    }
+
+    const { data: lead, error } = await supabase
+      .from("leads")
+      .insert({
+        bien_id: bienId,
+        nom: nom || null,
+        phone,
+        email: email || null,
+        besoin: message || "Demande d'informations",
+        statut: "nouveau"
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "insert lead failed" });
+    }
+
+    return res.json({ ok: true, lead });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Erreur serveur" });
+  }
+});
 
 // -----------------------------
 // Lancement serveur

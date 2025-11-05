@@ -1,3 +1,5 @@
+// index.js — IMMOWAY Proxy API (complet)
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -8,7 +10,7 @@ import PDFDocument from "pdfkit";
 dotenv.config();
 
 /* =========================
-   Helpers
+   Helpers généraux
    ========================= */
 function bufferFromStream(stream) {
   return new Promise((resolve, reject) => {
@@ -21,10 +23,7 @@ function bufferFromStream(stream) {
 
 function formatPrixEUR(val) {
   if (val == null) return "NC";
-  // toLocaleString ajoute un espace fine non-coupante; on la remplace par un espace
-  return (
-    Number(val).toLocaleString("fr-FR").replace(/\u202F/g, " ") + " €"
-  );
+  return Number(val).toLocaleString("fr-FR").replace(/\u202F/g, " ") + " €";
 }
 
 function formatSurface(val) {
@@ -37,47 +36,65 @@ function safeFilename(str, fallback = "document") {
 }
 
 /* =========================
-   Générateur PDF complet
+   Helpers mise en page PDF
+   ========================= */
+const h2 = (doc, txt) => {
+  doc.moveDown(0.8);
+  doc.fontSize(14).fillColor("#111").text(txt, { underline: true });
+  doc.moveDown(0.3);
+  doc.fillColor("#000");
+};
+
+const hr = (doc) => {
+  const x = doc.page.margins.left;
+  const y = doc.y + 6;
+  doc.moveTo(x, y)
+     .lineTo(doc.page.width - doc.page.margins.right, y)
+     .strokeColor("#DDD")
+     .stroke();
+  doc.moveDown(0.6);
+};
+
+/* =========================
+   Générateur PDF COMPLET (avec synthèse IA fournie)
    ========================= */
 async function buildBienPdf({ bien, synthese }) {
   const doc = new PDFDocument({ margin: 48 });
-  const out = doc; // on capte le stream pour retourner un Buffer
+  const out = doc; // capture du stream
 
-  // Titre
-  doc
-    .fontSize(22)
-    .fillColor("#111")
-    .text(bien.titre || "Fiche du bien", { underline: true });
-  doc.moveDown(0.5);
+  // Titre + séparation
+  doc.fontSize(22).fillColor("#111").text(bien.titre || "Fiche du bien", { underline: true });
+  hr(doc);
 
-  // Bandeau infos clés
-  doc
-    .fontSize(12)
-    .fillColor("#555")
-    .text(`Ville : ${bien.ville ?? "NC"}`);
+  // Caractéristiques
+  h2(doc, "Caractéristiques principales");
+  doc.fontSize(12).fillColor("#000");
+  doc.text(`Ville : ${bien.ville ?? "NC"}`);
   doc.text(`Prix : ${formatPrixEUR(bien.prix)}`);
   doc.text(`Surface : ${formatSurface(bien.surface)}`);
-  if (bien.pieces != null) doc.text(`Pièces : ${bien.pieces}`);
+  if (bien.pieces != null)   doc.text(`Pièces : ${bien.pieces}`);
   if (bien.chambres != null) doc.text(`Chambres : ${bien.chambres}`);
-  doc.moveDown();
+  if (bien.etage != null)    doc.text(`Étage : ${bien.etage}`);
+  if (bien.exposition)       doc.text(`Exposition : ${bien.exposition}`);
 
-  // Ligne de séparation
-  doc.moveTo(doc.x, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).strokeColor("#DDD").stroke();
-  doc.moveDown();
+  // Synthèse IA
+  if (synthese) {
+    h2(doc, "Présentation du bien (Synthèse IA)");
+    doc.fontSize(12).fillColor("#222").text(synthese, { align: "justify" });
+  }
 
-  // Bloc synthèse IA
-  doc.fillColor("#000").fontSize(16).text("Présentation du bien", { underline: true });
-  doc.moveDown(0.5);
-  doc.fontSize(12).fillColor("#222").text(synthese || "—", { align: "justify" });
+  // Liens utiles (si des champs existent)
+  const liens = [];
+  if (bien.url)        liens.push({ label: "Annonce", url: bien.url });
+  if (bien.dossierUrl) liens.push({ label: "Dossier complet", url: bien.dossierUrl });
+  if (liens.length) {
+    h2(doc, "Liens utiles");
+    liens.forEach(l => doc.text(`• ${l.label} : ${l.url}`));
+  }
 
-  // (Tu peux ajouter ici d’autres sections : équipements, atouts, liens, photos, etc.)
-
-  // Pied de page
-  doc.moveDown(2);
-  doc
-    .fontSize(10)
-    .fillColor("#888")
-    .text("Dossier généré automatiquement par IMMOWAY", { align: "center" });
+  hr(doc);
+  doc.fontSize(10).fillColor("#888")
+     .text("Dossier généré automatiquement par IMMOWAY", { align: "center" });
 
   doc.end();
   return bufferFromStream(out);
@@ -90,7 +107,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Supabase (clé service pour sécuriser l’insert leads)
+// Supabase (clé service pour opérations serveur)
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -117,7 +134,7 @@ app.get("/health", async (_req, res) => {
 });
 
 /* =========================
-   Agent intelligent
+   Agent intelligent (Q&A sur un bien)
    ========================= */
 app.post("/airagent", async (req, res) => {
   try {
@@ -138,12 +155,11 @@ app.post("/airagent", async (req, res) => {
 
     const SYSTEM_PROMPT = `
 Tu es un assistant immobilier professionnel d'IMMOWAY.
-Tu connais parfaitement le bien dont on te fournit les données (issues de la base IMMOWAY).
-Mission : répondre aux acheteurs de manière précise, claire, professionnelle, rassurante et orientée solutions.
-Ne jamais inventer. Si une info manque, précise que tu peux la vérifier auprès de l’agent.
-Valorise le bien (points forts, projection réaliste) sans exagérer.
-Termine par : « Souhaitez-vous organiser une visite ? Je peux m'en charger. »
-Réponds en français, concis et structuré.
+Tu réponds avec précision, clarté, professionnalisme et rassurance, sans inventer.
+Si une information manque, indique que tu peux la vérifier auprès de l’agent.
+Valorise les points forts sans exagérer. Ton style est concis et structuré.
+Termine toujours par : "Souhaitez-vous organiser une visite ? Je peux m'en charger."
+Réponds en français.
 `.trim();
 
     const userContent = `
@@ -225,7 +241,7 @@ app.post("/lead", async (req, res) => {
 });
 
 /* =========================
-   PDF — POST /pdf-bien (téléchargement via body)
+   PDF — POST /pdf-bien (via body)
    ========================= */
 app.post("/pdf-bien", async (req, res) => {
   try {
@@ -239,7 +255,7 @@ app.post("/pdf-bien", async (req, res) => {
       .single();
     if (error || !bien) return res.status(404).json({ error: "Bien introuvable" });
 
-    // Synthèse IA “réaliste et vendeuse”
+    // Synthèse IA réaliste & vendeuse
     let synthese = "";
     try {
       const completion = await openai.chat.completions.create({
@@ -249,11 +265,11 @@ app.post("/pdf-bien", async (req, res) => {
           {
             role: "system",
             content:
-              "Tu es un conseiller immobilier. Rédige une synthèse claire, structurée, réaliste et vendeuse du bien en français. Mets en avant les points forts (emplacement, luminosité, calme, agencement, extérieurs, copro/charges si dispo…). Évite tout mensonge.",
+              "Tu es un conseiller immobilier. Rédige une synthèse claire, structurée, réaliste et vendeuse du bien en français. Mets en avant les points forts (emplacement, luminosité, calme, agencement, extérieurs…), reste factuel.",
           },
           {
             role: "user",
-            content: `Données du bien (JSON) : ${JSON.stringify(bien)}. Rédige la synthèse (10-15 lignes max) avec des sous-titres courts si pertinent.`,
+            content: `Données du bien (JSON) : ${JSON.stringify(bien)}. 10–15 lignes max, sous-titres courts si pertinent.`,
           },
         ],
       });
@@ -261,14 +277,14 @@ app.post("/pdf-bien", async (req, res) => {
         completion?.choices?.[0]?.message?.content?.trim() ||
         "Présentation non disponible pour le moment.";
     } catch (e) {
-      console.warn("OpenAI indisponible pour le PDF, fallback :", e?.message || e);
+      console.warn("OpenAI indisponible pour /pdf-bien :", e?.message || e);
       synthese = [
         `Titre : ${bien.titre ?? "-"}`,
         `Ville : ${bien.ville ?? "-"}`,
         `Surface : ${formatSurface(bien.surface)}`,
         `Prix : ${formatPrixEUR(bien.prix)}`,
         ``,
-        `Présentation non disponible pour le moment.`
+        `Présentation non disponible pour le moment.`,
       ].join("\n");
     }
 
@@ -299,7 +315,7 @@ app.get("/pdf/:id", async (req, res) => {
       .single();
     if (error || !bien) return res.status(404).json({ error: "Bien introuvable" });
 
-    // Synthèse IA “réaliste et vendeuse”
+    // Synthèse IA réaliste & vendeuse
     let synthese = "";
     try {
       const completion = await openai.chat.completions.create({
@@ -313,7 +329,7 @@ app.get("/pdf/:id", async (req, res) => {
           },
           {
             role: "user",
-            content: `Données du bien (JSON) : ${JSON.stringify(bien)}. Fais court (10-15 lignes max).`,
+            content: `Données du bien (JSON) : ${JSON.stringify(bien)}. 10–15 lignes max.`,
           },
         ],
       });
@@ -321,14 +337,14 @@ app.get("/pdf/:id", async (req, res) => {
         completion?.choices?.[0]?.message?.content?.trim() ||
         "Présentation non disponible pour le moment.";
     } catch (e) {
-      console.warn("OpenAI indisponible pour /pdf/:id, fallback :", e?.message || e);
+      console.warn("OpenAI indisponible pour /pdf/:id :", e?.message || e);
       synthese = [
         `Titre : ${bien.titre ?? "-"}`,
         `Ville : ${bien.ville ?? "-"}`,
         `Surface : ${formatSurface(bien.surface)}`,
         `Prix : ${formatPrixEUR(bien.prix)}`,
         ``,
-        `Présentation non disponible pour le moment.`
+        `Présentation non disponible pour le moment.`,
       ].join("\n");
     }
 
@@ -366,30 +382,37 @@ app.get("/pdf-preview/:id", async (req, res) => {
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
-
     doc.pipe(res);
 
-    // Titre
-    doc.fontSize(20).fillColor("#111").text(bien.titre || `Bien #${bienId}`, { underline: true });
-    doc.moveDown();
+    // Titre + séparation
+    doc.fontSize(22).fillColor("#111").text(bien.titre || `Bien #${bienId}`, { underline: true });
+    hr(doc);
 
-    // Faits clés
-    const lignes = [
-      `Ville : ${bien.ville ?? "NC"}`,
-      `Prix : ${formatPrixEUR(bien.prix)}`,
-      `Surface : ${formatSurface(bien.surface)}`,
-    ];
-    lignes.forEach(l => doc.fontSize(12).fillColor("#222").text(l));
-    doc.moveDown();
+    // Caractéristiques principales
+    h2(doc, "Caractéristiques principales");
+    doc.fontSize(12).fillColor("#000");
+    doc.text(`Ville : ${bien.ville ?? "NC"}`);
+    doc.text(`Prix : ${formatPrixEUR(bien.prix)}`);
+    doc.text(`Surface : ${formatSurface(bien.surface)}`);
+    if (bien.pieces != null)   doc.text(`Pièces : ${bien.pieces}`);
+    if (bien.chambres != null) doc.text(`Chambres : ${bien.chambres}`);
 
-    // Aperçu
-    doc
-      .fontSize(12)
-      .fillColor("#333")
-      .text(
-        "Aperçu généré automatiquement. La version complète inclut la synthèse IA, les équipements, les photos et les liens.",
-        { align: "justify" }
-      );
+    // Points forts depuis la description (3 bullet points max)
+    if (bien.description) {
+      h2(doc, "Points forts (aperçu)");
+      const bullets = String(bien.description)
+        .split(/[.\n]/)
+        .map(s => s.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+      bullets.forEach(b => doc.text("• " + b));
+    }
+
+    hr(doc);
+    doc.fontSize(11).fillColor("#666").text(
+      "Aperçu généré automatiquement. La version complète inclut la synthèse IA, les équipements, les photos et les liens.",
+      { align: "justify" }
+    );
 
     doc.end();
   } catch (err) {
@@ -399,7 +422,7 @@ app.get("/pdf-preview/:id", async (req, res) => {
 });
 
 /* =========================
-   Lancement serveur (une seule fois)
+   Lancer le serveur (une seule fois)
    ========================= */
 const PORT = Number(process.env.PORT) || 10000;
 app.listen(PORT, () => {
